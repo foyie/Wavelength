@@ -1,0 +1,294 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+
+  # ── Backend tests ────────────────────────────────────────────────────────────
+
+  test-backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: music
+          POSTGRES_PASSWORD: music
+          POSTGRES_DB: music_recommender_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://music:music@localhost:5432/music_recommender_test
+      REDIS_URL: redis://localhost:6379
+      KAFKA_ENABLED: "false"
+      SPOTIFY_CLIENT_ID: "test"
+      SPOTIFY_CLIENT_SECRET: "test"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Run tests with coverage
+        run: |
+          cd backend
+          pytest tests/ -v \
+            --tb=short \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=80
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          file: backend/coverage.xml
+          flags: backend
+          fail_ci_if_error: false
+
+  # ── Backend lint ──────────────────────────────────────────────────────────────
+
+  lint-backend:
+    name: Backend Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install lint tools
+        run: pip install ruff mypy
+
+      - name: Ruff lint
+        run: |
+          cd backend
+          ruff check app/ --select=E,F,W,I --ignore=E501
+
+      - name: Type check (mypy)
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          mypy app/ --ignore-missing-imports --no-strict-optional
+        continue-on-error: true   # type errors are warnings, not blockers
+
+  # ── Frontend tests ────────────────────────────────────────────────────────────
+
+  test-frontend:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: TypeScript type check
+        run: |
+          cd frontend
+          npx tsc --noEmit
+
+      - name: Build
+        run: |
+          cd frontend
+          npm run build
+
+  # ── Docker build ──────────────────────────────────────────────────────────────
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend]
+    if: github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract metadata (frontend)
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Integration smoke test ────────────────────────────────────────────────────
+
+  integration-smoke:
+    name: Integration Smoke Test
+    runs-on: ubuntu-latest
+    needs: [test-backend]
+    if: github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Start services
+        run: |
+          docker compose up -d postgres redis
+          sleep 10
+          docker compose ps
+
+      - name: Install backend
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Start backend
+        run: |
+          cd backend
+          KAFKA_ENABLED=false \
+          DATABASE_URL=postgresql+asyncpg://music:music@localhost:5432/music_recommender \
+          REDIS_URL=redis://localhost:6379 \
+          SPOTIFY_CLIENT_ID=test \
+          SPOTIFY_CLIENT_SECRET=test \
+          uvicorn app.main:app --port 8000 &
+          sleep 5
+
+      - name: Health check
+        run: |
+          STATUS=$(curl -s http://localhost:8000/api/health | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+          echo "Health: $STATUS"
+          [ "$STATUS" = "healthy" ] || exit 1
+
+      - name: Smoke test recommendations endpoint
+        run: |
+          # Create user
+          curl -sf -X POST http://localhost:8000/api/users \
+            -H "Content-Type: application/json" \
+            -d '{"id":"ci-user","display_name":"CI"}' > /dev/null
+
+          # Get recommendations (empty catalog is OK — just check 200)
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            http://localhost:8000/api/recommend/ci-user)
+          echo "Recommendations HTTP: $HTTP_CODE"
+          [ "$HTTP_CODE" = "200" ] || exit 1
+
+      - name: Smoke test feedback endpoint
+        run: |
+          # Feedback for unknown song should return 200 (graceful ignore)
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST http://localhost:8000/api/feedback \
+            -H "Content-Type: application/json" \
+            -d '{"user_id":"ci-user","song_id":"nonexistent","action":"skip"}')
+          echo "Feedback HTTP: $HTTP_CODE"
+          [ "$HTTP_CODE" = "200" ] || exit 1
+
+      - name: Smoke test monitoring endpoint
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            http://localhost:8000/api/monitoring/drift)
+          echo "Monitoring HTTP: $HTTP_CODE"
+          [ "$HTTP_CODE" = "200" ] || exit 1
+
+      - name: Smoke test experiments endpoint
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            http://localhost:8000/api/experiments)
+          echo "Experiments HTTP: $HTTP_CODE"
+          [ "$HTTP_CODE" = "200" ] || exit 1
+
+      - name: Stop services
+        if: always()
+        run: docker compose down -v

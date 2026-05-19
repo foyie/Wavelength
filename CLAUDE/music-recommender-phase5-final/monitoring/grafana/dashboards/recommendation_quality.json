@@ -1,0 +1,134 @@
+{
+  "title": "Recommendation Quality",
+  "uid": "rec-quality",
+  "tags": ["music-recommender", "recommendations"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Recommendation Requests/min",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "rate(music_recommender_requests_total[1m]) * 60",
+        "legendFormat": "{{cache_hit}} cache"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqpm",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Recommendation Latency (p50/p95/p99)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(music_recommender_latency_ms_bucket[5m]))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(music_recommender_latency_ms_bucket[5m]))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(music_recommender_latency_ms_bucket[5m]))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ms" }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Feedback Events by Action",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "rate(music_feedback_events_total[5m]) * 60",
+        "legendFormat": "{{action}}"
+      }]
+    },
+    {
+      "id": 4,
+      "title": "Click-Through Rate (add / total)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 8, "w": 6, "h": 8 },
+      "targets": [{
+        "expr": "rate(music_feedback_events_total{action='add'}[5m]) / rate(music_feedback_events_total[5m])",
+        "legendFormat": "CTR"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 0.1 },
+              { "color": "green", "value": 0.2 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Mean Reward (sliding window)",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 8, "w": 6, "h": 8 },
+      "targets": [{
+        "expr": "music_bandit_mean_reward_per_user",
+        "legendFormat": "Mean Reward"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 0.3 },
+              { "color": "green", "value": 0.5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Reward Distribution",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "rate(music_feedback_reward_bucket[5m])",
+        "legendFormat": "le={{le}}"
+      }]
+    },
+    {
+      "id": 7,
+      "title": "Active Users (24h)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 16, "w": 6, "h": 8 },
+      "targets": [{
+        "expr": "music_active_users_24h",
+        "legendFormat": "Users"
+      }]
+    },
+    {
+      "id": 8,
+      "title": "Algorithm Usage",
+      "type": "piechart",
+      "gridPos": { "x": 18, "y": 16, "w": 6, "h": 8 },
+      "targets": [{
+        "expr": "increase(music_recommender_algorithm_total[1h])",
+        "legendFormat": "{{algorithm}}"
+      }]
+    }
+  ],
+  "schemaVersion": 39
+}

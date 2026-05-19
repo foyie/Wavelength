@@ -1,0 +1,26 @@
+venv/
+# venv311/
+# __pycache__/
+# *.pyc
+# .DS_Store
+# .ipynb_checkpoints/
+# # Large model files (train locally, download in Railway)
+# models/neuralprophet/
+# models/lstm/
+# models/lgbm/
+# models/conformal/
+
+# Data
+# CLAUDE
+
+# Python
+# __pycache__/
+# *.pyc
+.env
+
+# Logs
+# *.log
+# models/metrics_history.jsonl
+
+# OS
+.DS_Store

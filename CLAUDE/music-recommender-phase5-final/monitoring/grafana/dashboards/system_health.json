@@ -1,0 +1,163 @@
+{
+  "title": "System Health",
+  "uid": "system-health",
+  "tags": ["music-recommender", "system", "infrastructure"],
+  "timezone": "browser",
+  "refresh": "15s",
+  "time": { "from": "now-3h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "API Request Rate",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(http_requests_total{job='music-recommender-api'}[1m]) * 60",
+          "legendFormat": "{{method}} {{handler}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqpm" } }
+    },
+    {
+      "id": 2,
+      "title": "API Error Rate",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(http_requests_total{job='music-recommender-api',status_code=~'5..'}[5m]) / rate(http_requests_total{job='music-recommender-api'}[5m])",
+          "legendFormat": "5xx error rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 0.001 },
+              { "color": "red", "value": 0.01 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Recommendation Latency Heatmap",
+      "type": "heatmap",
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 10 },
+      "targets": [{
+        "expr": "rate(music_recommender_latency_ms_bucket[5m])",
+        "legendFormat": "{{le}}"
+      }],
+      "options": {
+        "calculate": false,
+        "yAxis": { "unit": "ms" }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Redis Cache Hit Rate",
+      "type": "gauge",
+      "gridPos": { "x": 0, "y": 18, "w": 6, "h": 6 },
+      "targets": [{
+        "expr": "rate(music_redis_cache_hits_total[5m]) / (rate(music_redis_cache_hits_total[5m]) + rate(music_redis_cache_misses_total[5m]))",
+        "legendFormat": "Hit Rate"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0, "max": 1,
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 0.8 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Kafka Consumer Lag",
+      "type": "timeseries",
+      "gridPos": { "x": 6, "y": 18, "w": 9, "h": 6 },
+      "targets": [{
+        "expr": "music_kafka_consumer_lag",
+        "legendFormat": "Consumer Lag (messages)"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 100 },
+              { "color": "red", "value": 1000 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Feedback Processing Latency p50/p95",
+      "type": "timeseries",
+      "gridPos": { "x": 15, "y": 18, "w": 9, "h": 6 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(music_feedback_processing_latency_ms_bucket[5m]))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(music_feedback_processing_latency_ms_bucket[5m]))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" } }
+    },
+    {
+      "id": 7,
+      "title": "DB Connection Pool",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 24, "w": 8, "h": 6 },
+      "targets": [{
+        "expr": "music_db_pool_size",
+        "legendFormat": "Pool Size"
+      }]
+    },
+    {
+      "id": 8,
+      "title": "Active Users (24h)",
+      "type": "stat",
+      "gridPos": { "x": 8, "y": 24, "w": 8, "h": 6 },
+      "targets": [{ "expr": "music_active_users_24h", "legendFormat": "Active Users" }],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 9,
+      "title": "Kafka Publish Success Rate",
+      "type": "stat",
+      "gridPos": { "x": 16, "y": 24, "w": 8, "h": 6 },
+      "targets": [{
+        "expr": "rate(music_kafka_publish_total{status='success'}[5m]) / rate(music_kafka_publish_total[5m])",
+        "legendFormat": "Kafka Success Rate"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 0.9 },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "schemaVersion": 39
+}
